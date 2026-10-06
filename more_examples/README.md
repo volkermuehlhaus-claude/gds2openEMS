@@ -18,6 +18,7 @@ README with the details.
 | [`parameterized_XML_stackup`](parameterized_XML_stackup) | Overriding stackup `<Variable>`s from a Python script without editing the XML file |
 | [`resistors_sg13g2`](resistors_sg13g2) | Simulating an IHP SG13G2 `Rsil` resistor recognized via `<DerivedLayers>` boolean operations |
 | [`resonance_estimation`](resonance_estimation) | `settings['resonance_estimation']`: why the end criterion matters for low-frequency results (L6n2 inductor), and how resonance estimation stops openEMS once the result has converged, with run time and accuracy for six examples |
+| [`textbook_microstrip_attenuation`](textbook_microstrip_attenuation) | Dielectric loss tangent (Debye dispersive model) on a textbook FR4 substrate, validated against the closed-form microstrip attenuation formula |
 
 Three examples (`combine_layout_sources`, `easyMesh`, `local_modules_copy`)
 share the same simple 2-port via-port test line
