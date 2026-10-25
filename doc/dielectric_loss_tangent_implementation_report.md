@@ -144,7 +144,7 @@ In order of increasing fidelity to the real code path:
    runs) matched the closed-form prediction to within 1.2% at 1 GHz, widening to 7.6% at 4 GHz
    - consistent with (not contradicting) the causality tradeoff in §4, since the textbook
    formula itself assumes a frequency-independent tanδ/εeff. See
-   [`more_examples/textbook_microstrip_attenuation/README.md`](../more_examples/textbook_microstrip_attenuation/README.md)
+   [`more_examples/loss_tangent/README.md`](../more_examples/loss_tangent/README.md)
    for the full derivation, numbers, and plot.
 
    (Two more ambitious worked examples - reproducing a published Rogers RO4350 hairpin filter

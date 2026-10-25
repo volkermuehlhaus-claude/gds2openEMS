@@ -111,7 +111,7 @@ No change to the XML file itself is needed to use this — existing `DielectricL
 values are picked up automatically. Without a frequency range passed to `setupSimulation()`,
 behavior is unchanged from before this feature existed: tanδ has no effect, and a one-time
 `NOTE:` is printed per affected material. See
-[`more_examples/textbook_microstrip_attenuation/`](../more_examples/textbook_microstrip_attenuation/)
+[`more_examples/loss_tangent/`](../more_examples/loss_tangent/)
 for a worked example comparing simulated results, with and without this feature, against the
 closed-form textbook microstrip attenuation formula.
 
