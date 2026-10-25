@@ -136,7 +136,7 @@ def fit_wideband_debye (eps_r, tand, f_start, f_stop, poles_per_decade=4, sample
   A = np.zeros((2 * n_rows_each, n_poles + 1))
   b = np.ones(2 * n_rows_each)
   A[0:n_rows_each, 0] = 1.0                       # eps_inf contributes only to the real part
-  A[0:n_rows_each, 1:] = real_part / eps_r
+  A[0:n_rows_each, 1:] = real_part
   A[n_rows_each:, 1:] = imag_part / tand
 
   x, _residual = nnls(A, b)
