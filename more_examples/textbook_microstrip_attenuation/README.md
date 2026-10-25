@@ -1,109 +1,94 @@
-# Textbook microstrip dielectric attenuation vs. simulation
+# Dielectric loss tangent in openEMS: microstrip test
 
-A minimal, fully self-contained check of the new `DielectricLossTangent` → dispersive Debye
-model feature (see [`../../doc/XML_stackup_format.md`](../../doc/XML_stackup_format.md#dielectric-loss-tangent--dispersive-materials)):
-a single straight 50-ohm microstrip line, simulated with and without the dielectric loss
-tangent, compared against the standard closed-form microstrip design and attenuation
-equations given in every microwave engineering textbook (e.g. Pozar, *Microwave Engineering*,
-Ch. 3, "Microstrip Line"). Nothing here is reverse-engineered from a paper's figure or
-measurement — every number is either a standard textbook formula or this example's own design
-choice, so "the right answer" is known exactly, by construction.
+So far, gds2openEMS ignores `DielectricLossTangent` in the stackup file: all dielectrics are simulated without loss. This example tests a prepared implementation that adds the loss tangent to the openEMS model. It is based on [PR #52](https://github.com/VolkerMuehlhaus/gds2openEMS/pull/52) by EngGhaith, with one fix in the material fit.
 
-(Two more ambitious examples - reproducing a published Rogers RO4350 hairpin filter and an
-RT/duroid dual-mode SIR filter exactly, measurement and simulated data included - were
-attempted first, but the coupled-resonator geometries proved too easy to get subtly wrong when
-reconstructed from text dimensions alone, without the original artwork. This example replaces
-that approach with one where the geometry is trivial enough to get right the first time.)
+The test case is a textbook microstrip line on FR4, simulated with and without loss tangent and compared with the textbook formula for dielectric loss.
 
-## Design
+## Key facts
 
-Substrate: Pozar's Table 3.1-style "typical FR4 (G10)" values - relative permittivity
-εr=4.3, loss tangent tanδ=0.02, substrate thickness h=1.6mm (a standard PCB thickness).
-Copper: real conductivity (5.8e7 S/m), 35µm (1oz) thick, both for the ground plane and the
-trace - so a conductor-loss contribution is present in *every* run, lossy-dielectric or not,
-and isolating the dielectric-loss effect means comparing the two runs against each other, not
-comparing either one against zero loss.
+- The extra loss from the loss tangent matches the textbook formula **within −1 % to +2 %**.
+- The permittivity stays right: the line's electrical length changes by less than 1 % when the loss tangent is switched on.
+- On the CPU, a lossy dielectric makes the simulation **7× to 30× slower**. On the GPU, it is only about **3× slower**. Use the GPU engine for models with loss tangent.
 
-The 50-ohm trace width was synthesized from the closed-form Hammerstad equations
-(`results/microstrip_design.py`), the standard microstrip synthesis formulas given in Pozar
-Ch. 3 (and in virtually every other microwave textbook/CAD tool, e.g. the widely used
-"TXLine"-style microstrip calculators):
+## How openEMS models a loss tangent
 
-| Quantity | Value |
+openEMS simulates in the time domain. A loss tangent that is constant over frequency has no direct equivalent there. Instead, the dielectric is described as a sum of relaxation terms (a Debye model), fitted so that ε′ and tan δ match the stackup values over the simulated band, `fstart` to `fstop`.
+
+A real dielectric with a constant loss tangent cannot have a perfectly constant ε′: physics (the Kramers-Kronig relations) ties the two together, so ε′ must fall slowly with frequency. The fitted model shows exactly that:
+
+![Fitted Debye model of the FR4](results/plots/fitted_material.png)
+
+- Inside the simulated band (grey), tan δ stays at 0.02, and ε′ stays within ±0.9 % of 4.3.
+- Outside the band, the model drifts away from the stackup values. That does not matter, because the simulation has no energy there.
+
+## Step 1: Does the loss come out right?
+
+The line is 100 mm long, 50 Ω, on 1.6 mm FR4 with εr = 4.3 and tan δ = 0.02, simulated from 1 to 4 GHz. It runs twice: once with tan δ = 0, once with tan δ = 0.02. The difference in |S21| is the loss caused by the loss tangent alone; the copper loss is the same in both runs and cancels out.
+
+![Extra loss from tan δ, openEMS vs textbook](results/plots/extra_loss.png)
+
+The simulated extra loss grows from 0.30 dB at 1 GHz to 1.30 dB at 4 GHz. It agrees with the textbook formula for microstrip dielectric loss (Pozar, *Microwave Engineering*) within −1 % to +2 %.
+
+## Step 2: Does the permittivity stay right?
+
+A loss model should add loss without changing the line's electrical length. From the phase of S21, the effective permittivity of the lossy line differs from the lossless one by at most ±0.8 %. That is exactly the small ε′ ripple of the fitted model shown above, so openEMS reproduces the fitted material faithfully.
+
+The group delay of the lossy line is about 0.7 % shorter. This is not an error: it follows from the slowly falling ε′ that a constant loss tangent requires, and the fitted model predicts the same value. A real FR4 line shows the same effect.
+
+## Step 3: What does it cost in run time?
+
+openEMS computes the Debye material on the CPU with a single thread only. A lossy dielectric therefore slows the CPU engine down a lot. The GPU engine computes it on the GPU, at much less cost:
+
+| Machine | CPU, lossless | CPU, lossy | GPU, lossless | GPU, lossy |
+|---|---|---|---|---|
+| hpz2 (Ryzen AI Max+ 395, Radeon 8060S) | 3.9 s | 27 s | 0.5 s | 1.3 s |
+| Windows laptop (Ryzen 7 5800H, RTX 3060 Laptop) | 12 s | 364 s | 0.9 s | 3.0 s |
+
+- On the CPU, the lossy line takes 7× (hpz2) to 30× (laptop) as long as the lossless one.
+- On the GPU, it takes about 3× as long.
+- For the lossy line, the GPU was 21× (hpz2) and 120× (laptop) faster than the CPU.
+
+CPU and GPU give the same results.
+
+## Using it
+
+The implementation is prepared, but not yet part of gds2openEMS. The plan:
+
+- The loss tangent stays off by default, because of the CPU run time. A setting will switch it on.
+- The fit uses `settings['fstart']` and `settings['fstop']` of the model. Inside that band, the loss tangent is reproduced; outside, it is not.
+- With the loss tangent switched on, run the model on the GPU (`settings['engine'] = 'gpu'`).
+
+## Model details
+
+| Item | Value |
 |---|---|
-| W/h (synthesized) | 1.9449 |
-| W | 3111.8 µm |
-| εeff | 3.2662 |
-| Self-consistency check: forward Z0(W/h) | 50.24 Ω (target 50 Ω - the ~0.5% gap is the Hammerstad formula's own well-known approximation error, not a bug) |
+| Substrate | FR4, εr = 4.3, tan δ = 0.02, 1.6 mm |
+| Conductors | copper, 35 µm, σ = 5.8e7 S/m (ground plane and strip) |
+| Line | 100 mm long, 3.11 mm wide (50 Ω from the Hammerstad formulas, see `results/microstrip_design.py`) |
+| Ports | via ports from ground to strip at both ends, port 1 excited |
+| Band | 1–4 GHz |
+| Mesh | 0.11 M cells, 200 µm at the strip edges, PEC boundaries |
+| End criterion | −40 dB |
+| Debye fit | 5 relaxation terms (default of the fit, 4 per decade) |
 
-Line length: 100 mm, chosen simply to make the expected dielectric loss (a few tenths to ~1 dB
-over the 1-4 GHz sweep) comfortably measurable from the simulated S21, without needing an
-exotic mesh or a long run.
+The textbook formula is Pozar's microstrip dielectric attenuation, α_d = k₀·εr·(ε_eff − 1)·tan δ / (2·√ε_eff·(εr − 1)), with ε_eff taken from the phase of the lossless simulation.
 
-The same closed-form equations also give the dielectric attenuation constant at any frequency
-(the standard Pozar-style formula, independently cross-checked against the literature):
+Files:
 
-```
-alpha_d = k0 * eps_r * (eps_eff - 1) * tan(delta) / (2 * sqrt(eps_eff) * (eps_r - 1))     [Np/m]
-```
+- `FR4_microstrip_lossless.xml`, `FR4_microstrip_lossy.xml`: the two stackups, identical except for `DielectricLossTangent`.
+- `run_microstrip_attenuation.py lossless|lossy`: builds and runs the model, writes `results/sparams_<variant>.npz` and a `.s2p` file.
+- `results/microstrip_design.py`: the line width from the textbook formulas.
+- `results/plot_comparison.py`: makes the two plots from the `.npz` files.
 
-No stackup XML change was needed to exercise the new feature - `FR4_microstrip_lossy.xml`
-simply declares `DielectricLossTangent="0.02"` on the FR4 material like any other stackup file
-would, and `setupSimulation()` picks it up automatically because the model script passes
-`settings['fstart']`/`settings['fstop']`.
+## Test details
 
-## Geometry
+| | hpz2 | Windows laptop |
+|---|---|---|
+| CPU | AMD Ryzen AI Max+ PRO 395, 16 cores | AMD Ryzen 7 5800H, 8 cores |
+| GPU | AMD Radeon 8060S, built-in, HIP | NVIDIA RTX 3060 Laptop, 6 GB, HIP |
+| OS | Linux | Windows 11 |
+| openEMS | v0.37.0-33-g53a4264 | v0.37.0-38-gd686f1d (Windows test package) |
+| CPU threads chosen by openEMS, lossy | 3 | not recorded |
+| Timesteps, lossless / lossy | 18,791 / 18,829 | 18,791 / 18,829 (CPU lossy: 18,278) |
 
-No GDSII file - the line, ground plane and via ports are built directly in Python with
-`allpolygons.add_rectangle()`, the same way as
-[`workflow/run_line_noGDSII.py`](../../workflow/run_line_noGDSII.py). Two stackup XML files,
-identical except for one attribute: `FR4_microstrip_lossless.xml`
-(`DielectricLossTangent="0.0"`) and `FR4_microstrip_lossy.xml` (`DielectricLossTangent="0.02"`).
-
-## Results
-
-`run_microstrip_attenuation.py lossless` and `run_microstrip_attenuation.py lossy` each run in
-well under a minute (112k FDTD cells, single-port excitation with symmetry assumed). Comparing
-the *difference* between the two simulated S21 curves against the closed-form αd·L prediction
-isolates exactly the effect the new feature adds - the conductor-loss contribution, present
-identically in both runs, cancels out of the comparison:
-
-| f (GHz) | Predicted αd·L (dB) | Simulated extra loss, lossy − lossless (dB) | Relative error |
-|---|---|---|---|
-| 1.00 | 0.297 | 0.301 | +1.2% |
-| 2.00 | 0.595 | 0.608 | +2.2% |
-| 3.00 | 0.892 | 0.935 | +4.8% |
-| 4.00 | 1.190 | 1.280 | +7.6% |
-
-![Simulated vs. closed-form microstrip attenuation](results/plots/microstrip_attenuation_comparison.png)
-
-The error growing with frequency is expected, not a defect, for two independent reasons:
-
-1. **Causality (Kramers-Kronig), by design.** As explained in
-   [`doc/dielectric_loss_tangent_implementation_report.md`](../../doc/dielectric_loss_tangent_implementation_report.md#4-the-causality-tradeoff-and-why-its-not-a-bug),
-   a causal wideband Debye fit that keeps tanδ close to its nominal value across a band cannot
-   also keep εr perfectly flat - some roll-off is physically unavoidable, and it grows with
-   frequency away from the fit's low-frequency end. The closed-form textbook formula, by
-   contrast, assumes a frequency-*independent* tanδ (and εeff), which is itself an
-   approximation that gets less accurate at higher frequency on real dielectrics - so some of
-   this gap is actually the textbook formula being the less accurate one, not the simulation.
-2. **Mesh/dispersion error**, which also grows with frequency on any fixed FDTD mesh (this
-   model used a deliberately quick, not mesh-converged, setup - `refined_cellsize=200µm`,
-   `cells_per_wavelength=15` - to keep the example fast; a finer mesh would narrow this gap
-   somewhat, at the cost of a longer run, see e.g.
-   [`more_examples/measured_vs_simulated/more_accurate_models_L6n2/`](../measured_vs_simulated/more_accurate_models_L6n2/)
-   for how much that convergence work actually involves on a more demanding model).
-
-Both effects point the same direction (more deviation at higher frequency), and a 1-8%
-deviation from a closed-form textbook formula - itself only accurate to a few percent - over a
-4:1 frequency sweep is a reasonable, explainable result, not a cause for concern.
-
-## Files
-
-- `FR4_microstrip_lossless.xml` / `FR4_microstrip_lossy.xml`: the two stackup variants.
-- `run_microstrip_attenuation.py [lossless|lossy]`: builds and runs the model, writes
-  `results/sparams_<variant>.npz` and a `.s2p` Touchstone file.
-- `results/microstrip_design.py`: the closed-form synthesis/attenuation calculation (standalone,
-  reproduces the design table above and the self-consistency check).
-- `results/plot_comparison.py`: regenerates `results/plots/microstrip_attenuation_comparison.png`
-  from the two `.npz` files.
+The plotted results are from the GPU runs on hpz2. The laptop's GPU runs gave the same S-parameters; its CPU run of the lossy line deviated by up to 0.04 dB, because it stopped at a slightly different timestep.
